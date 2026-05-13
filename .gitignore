@@ -6,3 +6,12 @@ data/
 
 # IDE
 .vscode/
+
+# W & B
+wandb/
+
+# experiments
+runs/
+
+# AMP Checks
+yolo26n.pt
