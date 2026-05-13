@@ -59,7 +59,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="YOLOv8 VisDrone 调优训练脚本")
     
     # --- 数据与配置参数 ---
-    parser.add_argument('--data', type=str, default='configs/visdrone_data.yaml')
+    parser.add_argument('--data', type=str, default='configs/dataset.yaml')
     parser.add_argument('--model', type=str, default='yolov8n.pt', help='yolov8n.pt, yolov8s.pt, etc.')
     
     # --- 核心训练超参数 ---
