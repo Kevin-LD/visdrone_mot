@@ -2,10 +2,29 @@ import cv2
 import argparse
 import os
 import time
+import numpy as np
 from ultralytics import YOLO
 
+def ccw(A, B, C):
+    """
+    使用叉积判断点 C 是否在线段 AB 的逆时针方向
+    (B.x-A.x)*(C.y-A.y) - (B.y-A.y)*(C.x-A.x)
+    """
+    val = (B[0] - A[0]) * (C[1] - A[1]) - (B[1] - A[1]) * (C[0] - A[0])
+    if val > 0: return 1   # 逆时针
+    if val < 0: return -1  # 顺时针
+    return 0               # 共线
+
+def intersect(p1, p2, p3, p4):
+    """
+    判断线段 (p1,p2) 与线段 (p3,p4) 是否相交
+    """
+    # 跨立实验：两条线段相互跨立则相交
+    return (((ccw(p1, p2, p3) * ccw(p1, p2, p4)) < 0) and 
+            ((ccw(p3, p4, p1) * ccw(p3, p4, p2)) < 0))
+
 def run_tracking(args):
-    # 1. 加载模型 (自动识别检测任务)
+    # 1. 加载模型
     print(f"--- 正在加载模型: {args.model} ---")
     model = YOLO(args.model)
 
@@ -15,7 +34,6 @@ def run_tracking(args):
         print(f"错误: 无法打开视频文件 {args.input}")
         return
 
-    # 获取视频元数据
     width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps    = cap.get(cv2.CAP_PROP_FPS)
@@ -26,9 +44,19 @@ def run_tracking(args):
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(args.output, fourcc, fps, (width, height))
 
-    print(f"--- 开始处理视频: {width}x{height}, FPS: {fps} ---")
-    print(f"--- 结果将保存至: {args.output} ---")
+    # 计数器初始化
+    # 基于 1920*1080 中心坐标系，调整 y 偏置为正值以定位在左下方
+    # 点1: (-397, 201) -> x=960-397=563, y=540+201=741
+    # 点2: (-470, 327) -> x=960-470=490, y=540+327=867
+    line_pt1 = (int(width * 0.2932), int(height * 0.6861))
+    line_pt2 = (int(width * 0.2552), int(height * 0.8028))
+    
+    counter = 0
+    # 存储格式 {track_id: (last_cx, last_cy)}，用于记录上一帧的位置
+    track_history = {}  
 
+    print(f"--- 开始处理视频: {width}x{height}, FPS: {fps} ---")
+    
     frame_count = 0
     start_time = time.time()
 
@@ -38,8 +66,6 @@ def run_tracking(args):
             break
 
         # 4. 执行跟踪
-        # persist=True 保证跟踪器在帧之间保持状态
-        # tracker 参数可选 'botsort.yaml' 或 'bytetrack.yaml'
         results = model.track(
             source=frame,
             persist=True,
@@ -51,46 +77,72 @@ def run_tracking(args):
             verbose=False
         )
 
-        # 5. 可视化结果
-        # 调整 line_width 为 1，font_size 适当减小 (如 0.5 到 0.8)
+        # 5. 处理越线逻辑 (只有开启 --count 时运行)
+        if args.count and results[0].boxes.id is not None:
+            boxes = results[0].boxes.xyxy.cpu().numpy()
+            track_ids = results[0].boxes.id.int().cpu().tolist()
+
+            for box, track_id in zip(boxes, track_ids):
+                # 取底边中点作为判定点
+                cx = int((box[0] + box[2]) / 2)
+                cy = int(box[3]) 
+                current_pos = (cx, cy)
+
+                if track_id in track_history:
+                    prev_pos = track_history[track_id]
+                    
+                    # 判断物体上一帧到这一帧的轨迹(线段)是否与计数线段相交
+                    if intersect(prev_pos, current_pos, line_pt1, line_pt2):
+                        counter += 1
+                        # 可以在此打印或记录，防止同一物体在后续帧因抖动重复触发
+                        # 但由于是线段相交，通常物体穿过后就不会再与该线段相交
+                
+                # 更新位置历史
+                track_history[track_id] = current_pos
+
+        # 6. 可视化
         annotated_frame = results[0].plot(
-            line_width=2,       # 减小框的线条宽度
-            font_size=0.6,     # 减小字体大小
-            conf=False,         # 如果不需要看置信度，设为 False 可以让标签更短
-            labels=True        # 保持显示类别和ID
+            line_width=2,
+            font_size=0.6,
+            conf=False,
+            labels=True
         )
 
-        # 写入帧
+        # 绘制计数线和结果
+        if args.count:
+            # 选用青色 (BGR: 255, 255, 0)，粗度设为 4
+            cv2.line(annotated_frame, line_pt1, line_pt2, (255, 255, 0), 4)
+            # 在线段起点标注一下 L1/L2 方便调试
+            cv2.putText(annotated_frame, "Count Line", (line_pt2[0]-20, line_pt2[1]+30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+            
+            # 显示计数结果
+            cv2.putText(annotated_frame, f"Count: {counter}", (50, 80), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 165, 255), 3)
+
         out.write(annotated_frame)
 
         frame_count += 1
         if frame_count % 30 == 0:
             elapsed = time.time() - start_time
-            curr_fps = frame_count / elapsed
-            print(f"进度: {frame_count}/{total_frames} 帧 | 当前平均 FPS: {curr_fps:.2f}")
+            print(f"进度: {frame_count}/{total_frames} | 计数: {counter} | FPS: {frame_count/elapsed:.2f}")
 
-    # 6. 释放资源
     cap.release()
     out.release()
-    total_time = time.time() - start_time
-    print(f"--- 处理完成！总耗时: {total_time:.2f}s, 平均 FPS: {frame_count/total_time:.2f} ---")
+    print(f"--- 处理完成！最终总数: {counter} ---")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="YOLOv8 视频跟踪评估脚本")
+    parser = argparse.ArgumentParser(description="YOLOv8 视频跟踪与越线计数脚本")
     
-    # 路径参数
-    parser.add_argument('--model', type=str, required=True, help='训练好的 best.pt 模型路径')
-    parser.add_argument('--input', type=str, required=True, help='输入视频路径')
-    parser.add_argument('--output', type=str, default='output/result.mp4', help='保存视频路径')
-    
-    # 跟踪超参数
-    parser.add_argument('--imgsz', type=int, default=640, help='推理分辨率')
-    parser.add_argument('--conf', type=float, default=0.25, help='置信度阈值')
-    parser.add_argument('--iou', type=float, default=0.45, help='NMS IOU 阈值')
-    parser.add_argument('--tracker', type=str, default='bytetrack.yaml', choices=['botsort.yaml', 'bytetrack.yaml'])
-    
-    # 硬件参数
-    parser.add_argument('--device', type=str, default='0', help='cpu 或 0, 1...')
+    parser.add_argument('--model', type=str, required=True, help='模型路径')
+    parser.add_argument('--input', type=str, required=True, help='输入路径')
+    parser.add_argument('--output', type=str, default='output/result.mp4', help='输出路径')
+    parser.add_argument('--imgsz', type=int, default=640)
+    parser.add_argument('--conf', type=float, default=0.25)
+    parser.add_argument('--iou', type=float, default=0.45)
+    parser.add_argument('--tracker', type=str, default='bytetrack.yaml')
+    parser.add_argument('--device', type=str, default='0')
+    parser.add_argument('--count', action='store_true', help='是否开启越线计数功能')
 
     args = parser.parse_args()
     run_tracking(args)
