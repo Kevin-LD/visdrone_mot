@@ -18,3 +18,6 @@ weights/
 
 # AMP Checks
 yolo26n.pt
+
+# inference results
+output/
