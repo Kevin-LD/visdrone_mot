@@ -35,5 +35,5 @@ python src/tracker_eval.py -h
 模型权重下载链接：[Google Drive Link](https://drive.google.com/file/d/1VD7jnPL8jcp6kPRprn_ptsq_WHy5IRDW/view?usp=sharing)  
 ## 相关仓库
 - Task 1: [Pet Classification with Transfer Learning](https://github.com/Kevin-LD/pet_classification_transfer_learning)
-- Task 3: TODO  
-- Report: [TODO](https://github.com/Kevin-LD/cv_midterm_report) 
+- Task 3: [Pixel-level-Training-Of-Image-Segmentation](https://github.com/F1shermanCNN/Pixel-level-Training-Of-Image-Segmentation#pixel-level-training-of-image-segmentation)
+- Report: [Computer Vision Midterm Report](https://github.com/Kevin-LD/cv_midterm_report) 
